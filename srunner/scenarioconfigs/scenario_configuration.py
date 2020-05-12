@@ -10,7 +10,7 @@ This module provides the key configuration parameters for an XML-based scenario
 """
 
 import carla
-
+                
 
 class ActorConfigurationData(object):
 

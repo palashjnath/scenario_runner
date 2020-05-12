@@ -23,14 +23,14 @@ from srunner.scenariomanager.scenarioatomics.atomic_behaviors import (TrafficLig
                                                                       ActorTransformSetterToOSCPosition,
                                                                       AccelerateToVelocity,
                                                                       ChangeAutoPilot,
-                                                                      KeepVelocity,
-                                                                      LaneChange,
                                                                       RunScript,
-                                                                      SetRelativeOSCVelocity,
-                                                                      UpdateWeather,
-                                                                      UpdateRoadFriction,
-                                                                      Idle,
-                                                                      WaypointFollower)
+                                                                      ChangeWeather,
+                                                                      ChangeRoadFriction,
+                                                                      ChangeActorTargetSpeed,
+                                                                      ChangeActorAgent,
+                                                                      ChangeActorWaypoints,
+                                                                      ChangeActorLateralMotion,
+                                                                      Idle)
 # pylint: disable=unused-import
 # For the following includes the pylint check is disabled, as these are accessed via globals()
 from srunner.scenariomanager.scenarioatomics.atomic_criteria import (CollisionTest,
@@ -154,6 +154,24 @@ class OpenScenarioParser(object):
         dtime = datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S")
 
         return Weather(carla_weather, dtime, weather_animation)
+
+    @staticmethod
+    def get_controller(xml_tree, catalogs):
+        assign_action = xml_tree.find('AssignControllerAction')
+        module = None
+        args = {}
+        for property in assign_action.find('Controller').find('Properties'):
+            if property.attrib.get('name') == "module":
+                module =  property.attrib.get('value')
+            else:
+                args[property.attrib.get('name')] = property.attrib.get('value')
+
+        override_action = xml_tree.find('OverrideControllerValueAction')
+        for child in override_action:
+            if strtobool(child.attrib.get('active')):
+                raise NotImplementedError("Controller override actions are not yet supported")
+                    
+        return module, args
 
     @staticmethod
     def convert_position_to_transform(position, actor_list=None):
@@ -544,9 +562,9 @@ class OpenScenarioParser(object):
                 else:
                     raise NotImplementedError("TrafficLights can only be influenced via TrafficSignalStateAction")
             elif global_action.find('EnvironmentAction') is not None:
-                weather_behavior = UpdateWeather(
+                weather_behavior = ChangeWeather(
                     OpenScenarioParser.get_weather_from_env_action(global_action, catalogs))
-                friction_behavior = UpdateRoadFriction(
+                friction_behavior = ChangeRoadFriction(
                     OpenScenarioParser.get_friction_from_env_action(global_action, catalogs))
 
                 env_behavior = py_trees.composites.Parallel(
@@ -588,11 +606,14 @@ class OpenScenarioParser(object):
                     if long_maneuver.find("SpeedActionTarget").find("AbsoluteTargetSpeed") is not None:
                         target_speed = float(long_maneuver.find("SpeedActionTarget").find(
                             "AbsoluteTargetSpeed").attrib.get('value', 0))
-                        atomic = KeepVelocity(actor,
-                                              target_speed,
-                                              distance=distance,
-                                              duration=duration,
-                                              name=maneuver_name)
+                        # atomic = KeepVelocity(actor,
+                        #                      target_speed,
+                        #                      distance=distance,
+                        #                      duration=duration,
+                        #                      name=maneuver_name)
+
+                        atomic = ChangeActorTargetSpeed(
+                            actor, target_speed, distance=distance, duration=duration, name=maneuver_name)
 
                     # relative velocity to given actor
                     if long_maneuver.find("SpeedActionTarget").find("RelativeTargetSpeed") is not None:
@@ -605,13 +626,16 @@ class OpenScenarioParser(object):
                         for traffic_actor in CarlaDataProvider.get_world().get_actors():
                             if 'role_name' in traffic_actor.attributes and traffic_actor.attributes['role_name'] == obj:
                                 obj_actor = traffic_actor
-                        atomic = SetRelativeOSCVelocity(actor,
-                                                        obj_actor,
-                                                        value,
-                                                        value_type,
-                                                        continuous,
-                                                        duration,
-                                                        distance)
+
+                        atomic = ChangeActorTargetSpeed(actor,
+                                                        target_speed,
+                                                        relative_actor=obj_actor,
+                                                        value=value,
+                                                        value_type=value_type,
+                                                        continuous=continuous,
+                                                        distance=distance,
+                                                        duration=duration,
+                                                        name=maneuver_name)
 
                 elif private_action.find('LongitudinalDistanceAction') is not None:
                     raise NotImplementedError("Longitudinal distance actions are not yet supported")
@@ -635,11 +659,10 @@ class OpenScenarioParser(object):
                     else:
                         duration = float(
                             lat_maneuver.find("LaneChangeActionDynamics").attrib.get('value', float("inf")))
-                    atomic = LaneChange(actor,
-                                        None,
-                                        direction="left" if target_lane_rel < 0 else "right",
-                                        distance_lane_change=distance,
-                                        name=maneuver_name)
+                    atomic = ChangeActorLateralMotion(actor,
+                                                      direction="left" if target_lane_rel < 0 else "right",
+                                                      distance_lane_change=distance,
+                                                      name=maneuver_name)
                 else:
                     raise AttributeError("Unknown lateral action")
             elif private_action.find('VisibilityAction') is not None:
@@ -651,7 +674,9 @@ class OpenScenarioParser(object):
                 activate = strtobool(private_action.attrib.get('longitudinal'))
                 atomic = ChangeAutoPilot(actor, activate, name=maneuver_name)
             elif private_action.find('ControllerAction') is not None:
-                raise NotImplementedError("Controller actions are not yet supported")
+                controller_action = private_action.find('ControllerAction')
+                module, args = get_controller(controller_action, catalogs)
+                atomic = ChangeActorAgent(actor, agent=module, args=args)
             elif private_action.find('TeleportAction') is not None:
                 position = private_action.find('TeleportAction')
                 atomic = ActorTransformSetterToOSCPosition(actor, position, name=maneuver_name)
@@ -662,17 +687,14 @@ class OpenScenarioParser(object):
                     private_action = private_action.find('AssignRouteAction')
                     if private_action.find('Route') is not None:
                         route = private_action.find('Route')
-                        plan = []
-                        if route.find('ParameterDeclarations') is not None:
-                            if route.find('ParameterDeclarations').find('Parameter') is not None:
-                                parameter = route.find('ParameterDeclarations').find('Parameter')
-                                if parameter.attrib.get('name') == "Speed":
-                                    target_speed = float(parameter.attrib.get('value', 5.0))
+                        waypoints = []
                         for waypoint in route.iter('Waypoint'):
                             position = waypoint.find('Position')
                             transform = OpenScenarioParser.convert_position_to_transform(position)
-                            plan.append(transform.location)
-                        atomic = WaypointFollower(actor, target_speed=target_speed, plan=plan, name=maneuver_name)
+                            waypoints.append(CarlaDataProvider.get_map().get_waypoint(transform.location,
+                                                                                      project_to_road=True,
+                                                                                      lane_type=carla.LaneType.Any))
+                        atomic = ChangeActorWaypoints(actor, waypoints=waypoints, name=maneuver_name)
                     elif private_action.find('CatalogReference') is not None:
                         raise NotImplementedError("CatalogReference private actions are not yet supported")
                     else:
@@ -687,7 +709,7 @@ class OpenScenarioParser(object):
                 raise AttributeError("Unknown private action")
 
         else:
-            if action:
+            if action is not None:
                 raise AttributeError("Unknown action: {}".format(maneuver_name))
             else:
                 return Idle(duration=0, name=maneuver_name)
