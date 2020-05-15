@@ -214,8 +214,9 @@ class OpenScenario(BasicScenario):
         init_behavior = py_trees.composites.Parallel(
             policy=py_trees.common.ParallelPolicy.SUCCESS_ON_ALL, name="InitBehaviour")
 
-        for actor in self.config.other_actors:
-            for carla_actor in self.other_actors:
+
+        for actor in self.config.other_actors + self.config.ego_vehicles:
+            for carla_actor in self.other_actors + self.ego_vehicles:
                 if 'role_name' in carla_actor.attributes and carla_actor.attributes['role_name'] == actor.rolename:
                     actor_init_behavior = py_trees.composites.Sequence(name="InitActor{}".format(actor.rolename))
                     
@@ -234,8 +235,6 @@ class OpenScenario(BasicScenario):
                     
                     if controller_atomic is None:
                         controller_atomic = ChangeActorAgent(carla_actor)
-                    else:
-                        print(controller_atomic.__class__)
                     
                     actor_init_behavior.add_child(controller_atomic)
 

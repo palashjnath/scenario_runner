@@ -69,6 +69,25 @@
                             </Position>
                         </TeleportAction>
                     </PrivateAction>
+                    <PrivateAction>
+                        <ControllerAction>
+                            <AssignControllerAction>
+                                <Controller name="HeroAgent">
+                                    <Properties>
+                                        <Property name="module" value="/work/scenario_runner/srunner/scenariomanager/scenarioagents/remote_agent.py" />
+                                    </Properties>
+                                </Controller>
+                            </AssignControllerAction>
+                            <OverrideControllerValueAction>
+                                <Throttle value="0" active="false" />
+                                <Brake value="0" active="false" />
+                                <Clutch value="0" active="false" />
+                                <ParkingBrake value="0" active="false" />
+                                <SteeringWheel value="0" active="false" />
+                                <Gear number="0" active="false" />
+                            </OverrideControllerValueAction>
+                        </ControllerAction>
+                    </PrivateAction>
                 </Private>
                 <Private entityRef="adversary">
                     <PrivateAction>

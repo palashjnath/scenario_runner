@@ -13,7 +13,7 @@ from srunner.scenariomanager.scenarioagents.basic_agent import BasicAgent
 
 class PedestrianAgent(BasicAgent):
     
-    def __init__(self, actor):
+    def __init__(self, actor, args=None):
         super(PedestrianAgent, self).__init__(actor)
 
     def reset(self):
